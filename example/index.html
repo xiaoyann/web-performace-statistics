@@ -3,29 +3,30 @@
 <head>
 	<meta charset="UTF-8">
 	<script type="text/javascript">
-		var navigationStart = (new Date()).getTime();
+		var startLoadTime = Date.now();
 	</script>
 	<link rel="stylesheet" type="text/css" href="./index.css">
 	<script type="text/javascript">
-		var firstPaintTime = (new Date()).getTime() - navigationStart;
+		var startRenderTime = Date.now();
 	</script>
 	<title>Web Performace Statistics</title>
 </head>
 <body>
+	<div class="main">
+		
+	</div>
 <script src="../src/wps.js"></script>
 <script>
 	WPS.init({
-		url: './log',
-		navigationStart: navigationStart,
+		url: './log.png',
+		startLoadTime: startLoadTime,
+		startRenderTime: startRenderTime,
 		alias: {
 			home: 'a'
-		},
+		}
 	});
-
-	WPS.sendFirstPaintTime(firstPaintTime, 'home');
-
 	// 清理不再使用的变量
-	navigationStart = firstPaintTime = null;
+	startLoadTime = startRenderTime = null;
 </script>
 </body>
 </html>

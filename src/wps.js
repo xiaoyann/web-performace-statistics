@@ -1,28 +1,110 @@
 /**
- * WPS(WEB Performace Statistics)
+ * WPS(WEB Performance Statistics)
  *
  * Todos: 
  * 1. 增加频率限制
+ * 2. 网速测试
  */
 
 'use strict';
 
 ;(function(window, document) {
 
-	// 类型：白屏时间
-	var FIRST_PAINT_TIME = 'FIRST_PAINT_TIME';
-	// 类型：首屏时间
-	var ABOVE_THE_FOLD_TIME = 'ABOVE_THE_FOLD_TIME';
-	// 类型：页面错误
-	var PAGE_ERROR = 'PAGE_ERROR';
+	var WPS;
 
 	// 类型的字段名
 	var KEY_TYPE = 't';
+	
 	// 模块的字段名
 	var KEY_MODULE = 'm';
+
 	// 数据内容的字段名
 	var KEY_VALUE = 'v';
 
+	var _toString = Object.prototype.toString;
+
+
+	
+	/**
+	 * 检测 obj 是否是数组
+	 * @return {Boolean}
+	 */
+    function isArray(obj) {
+        return _toString.call(obj) === '[object Array]';
+    }
+
+
+    /**
+	 * 检测 obj 是否是函数
+	 * @return {Boolean}
+	 */
+    function isFunction(obj) {
+        return typeof obj === 'function';
+    }
+
+
+    /**
+	 * 检测 obj 是否是 Object
+	 * @return {Boolean}
+	 */
+    function isObject(obj) {
+        return !!obj && _toString.call(obj) === '[object Object]';
+    }
+
+
+    /**
+     * 将 source 的属性浅复制到 target
+     * @return {object}
+     */
+	function extend(target, source) {
+		for (var key in source) {
+			if (typeof source[key] !== 'undefined') {
+				target[key] = source[key];
+			}
+		}
+		return target;
+	}
+
+
+    /**
+     * 序列化 data，参考 jQuery
+     * @param  {object} data
+     * @return {string}
+     */
+    function queryString(data) {
+        var s = [];
+        
+        if (isArray(data)) {
+            for (var i = 0; i < data.length; i++) {
+                add(data[i].name, data[i].value);
+            }
+        } else if (isObject(data)) {
+            for (var name in data) {
+                serialize(name, data[name]);
+            }
+        }
+
+        function serialize(prefix, obj) {
+            if (isArray(obj)) {
+                for (var i = 0; i < obj.length; i++) {
+                    serialize(prefix + '[' + (typeof obj[i] === 'object' ? i : '') +']', obj[i]);
+                }
+            } else if (isObject(obj)) {
+                for (var name in obj) {
+                    serialize(prefix + '['+ name +']', obj[name]);
+                }
+            } else {
+                add(prefix, obj);
+            }
+        }
+
+        function add(name, value) {
+            value = isFunction(value) ? value() : (value == null ? '' : value);
+            s.push(encodeURIComponent(name) + '=' + encodeURIComponent(value));   
+        }
+
+        return s.join('&').replace(/%20/g, '+');
+    }
 
 
 	/**
@@ -32,42 +114,18 @@
 	 * @return undefined
 	 */
 	function send(data, url) {
-		console.log(data)
-		return;
 		if (!data || !url) return;
 		var dataStr = queryString(data);
+		console.log(dataStr);
 		var img = document.createElement('img');
+		var key = '_img_' + (new Date()).getTime();
+		// 保持img的引用，防止img被回收后阻止请求发出
+		send[key] = img;
+		img.onload = img.onerror = function() {
+			send[key] = img = img.onload = img.onerror = null;
+			delete send[key];
+		};
 		img.src = url + (url.indexOf('?') > -1 ? '&' : '?') + dataStr;
-	}
-
-
-	/**
-	 * 格式化需要传输的数据
-	 * @param  {object} data 一维键值对对象
-	 * @return {string}
-	 */
-	function queryString(data) {
-		var res = [];
-		for (var key in data) {
-			res.push(key + '=' + encodeURIComponent(data[key]));
-		}
-		return res.join('&');
-	}
-
-
-	/**
-	 * 将 source 的属性扩展到 target
-	 * @param  {object} target 被扩展的对象
-	 * @param  {object} source
-	 * @return {object}  
-	 */
-	function extend(target, source) {
-		for (var key in source) {
-			if (typeof source[key] !== 'undefined') {
-				target[key] = source[key];
-			}
-		}
-		return target;
 	}
 
 
@@ -86,18 +144,55 @@
 		return data;
 	}
 
+	
+	/**
+	 * createFakeTiming
+	 * @return {object or undefined} fakeTiming
+	 */
+	function createFakeTiming() {
+		var timing, fakeTiming, 
+			performance = window.performance || window.webkitPerformance || window.msPerformance || window.mozPerformance;
+		if (performance && (timing = performance.timing)) {
+			fakeTiming = {
+				startLoadTime: timing.navigationStart || timing.fetchStart,
+				startRenderTime: timing.domLoading,
+				endLoadTime: timing.loadEventEnd
+			};
+		}
+		return fakeTiming;
+	}
+	
+
+	/**
+	 * 页面加载完成后，上送 timing
+	 * @return undefined
+	 */
+	function handleOnload() {
+		WPS.setTiming('endLoadTime', Date.now());
+		WPS.sendTimingInfo();
+		if (window.removeEventListener) {
+			window.removeEventListener('load', handleOnload);
+		} else if (window.detachEvent) {
+			window.detachEvent('load', handleOnload);
+		}
+		handleOnload = null;
+	}
 
 
-	var WPS = {
+
+
+
+	WPS = {
 		/**
 		 * 上送数据的地址
 		 */
 		_url: '',
 
-		/**
-		 * 准备加载新页面的起始时间
-		 */
-		_navigationStart: 0,
+		_timing: {
+			startLoadTime: 0,
+			startRenderTime: 0,
+			endLoadTime: 0
+		},
 
 		/**
 		 * 别名配置，类型名称和模块名称都是固定的，
@@ -112,29 +207,35 @@
 		 */
 		init: function(options) {
 			this._url = options.url || '';
-			this._navigationStart = parseInt(options.navigationStart) || 0;
-			
-			// 设置类型名称的默认别名
-			var alias = {};
-			alias[FIRST_PAINT_TIME] = '0';
-			alias[ABOVE_THE_FOLD_TIME] = '1';
-			alias[PAGE_ERROR] = '2';
-
-			if (options.alias) this._alias = extend(alias, options.alias);
-
+			this.setTiming('startLoadTime', options.startLoadTime);
+			this.setTiming('startRenderTime', options.startRenderTime);
+			if (options.alias) extend(this._alias, options.alias);
+			this.bindOnload();
 			return this;
 		},
 
-		/**
-		 * 上送白屏时间
-		 * @param  {number} v   白屏时间
-		 * @param  {string} m   所属模块
-		 * @param  {string} url 上送地址，可选，未设置时则使用初始化时设置的url
-		 * @return undefined
-		 */
-		sendFirstPaintTime: function(v, m, url) {
-			var data = createDataModel(FIRST_PAINT_TIME, m, v);
-			this._sendToServer(data, url);
+		setTiming: function(name, value) {
+			this._timing[name] = parseInt(value) || 0;
+		},
+
+		getTiming: function(name) {
+			return name ? this._timing[name] : this._timing;
+		},
+
+		bindOnload: function() {
+			if (window.addEventListener) {
+				window.addEventListener('load', handleOnload, false);
+			} else if (window.attachEvent) {
+				window.attachEvent('onload', handleOnload);
+			}
+		},
+
+		sendTimingInfo: function() {
+			var timing = createFakeTiming() || WPS.getTiming();
+			var firstPaintTime = timing.startRenderTime - timing.startLoadTime;
+			var allLoadTime = timing.endLoadTime - timing.startLoadTime;
+			var data = createDataModel('timing', 'home', {ws: firstPaintTime, fs: 0, tl: allLoadTime});
+			this._sendToServer(data);
 		},
 		
 		/**
@@ -160,6 +261,7 @@
 	window.WPS = WPS;
 
 })(window, document);
+
 
 
 
